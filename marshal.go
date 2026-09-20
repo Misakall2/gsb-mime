@@ -3,6 +3,7 @@ package mimemsg
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -44,6 +45,10 @@ func marshalEntity(p *Part, root bool) ([]byte, error) {
 		return out, nil
 	}
 
+	if p.MediaType() == "message/rfc822" {
+		return marshalMessageRFC822(p, root)
+	}
+
 	out = append(out, serializeHeaders(p, "")...)
 	cte := p.CTE
 	if cte == "" {
@@ -58,6 +63,43 @@ func marshalEntity(p *Part, root bool) ([]byte, error) {
 	out = append(out, "\r\n\r\n"...)
 	out = append(out, body...)
 	if root && len(body) > 0 && !strings.HasSuffix(string(body), "\r\n") {
+		out = append(out, "\r\n"...)
+	}
+	return out, nil
+}
+
+// marshalMessageRFC822 序列化封装消息段：内层消息整体 Marshal 后作为
+// 段正文。CTE 只接受身份编码（缺省时按内层字节自动选 7bit/8bit），
+// base64 / quoted-printable 对 message/* 不合法，直接报错。
+func marshalMessageRFC822(p *Part, root bool) ([]byte, error) {
+	if p.Message == nil {
+		return nil, ErrMissingInnerMessage
+	}
+	inner, err := marshalEntity(p.Message, true)
+	if err != nil {
+		return nil, err
+	}
+	cte := p.CTE
+	if cte == "" {
+		if is7BitLineSafe(inner) {
+			cte = "7bit"
+		} else {
+			cte = "8bit"
+		}
+	}
+	switch cte {
+	case "7bit", "8bit", "binary":
+	default:
+		return nil, fmt.Errorf("%w: message/rfc822 with %q", ErrUnsupportedEncoding, cte)
+	}
+
+	var out []byte
+	out = append(out, serializeHeaders(p, "")...)
+	out = append(out, "Content-Transfer-Encoding: "...)
+	out = append(out, cte...)
+	out = append(out, "\r\n\r\n"...)
+	out = append(out, inner...)
+	if root && len(inner) > 0 && !hasCRLFSuffix(inner) {
 		out = append(out, "\r\n"...)
 	}
 	return out, nil

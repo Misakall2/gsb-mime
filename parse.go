@@ -54,12 +54,37 @@ func parseEntity(data []byte) (*Part, error) {
 		return p, nil
 	}
 
+	if p.mediaType == "message/rfc822" {
+		return parseMessageRFC822(p, body)
+	}
+
 	decoded, err := decodeTransfer(body, p.CTE)
 	if err != nil {
 		return nil, err
 	}
 	p.Body = decoded
 	return p, validateBodyCharset(p)
+}
+
+// parseMessageRFC822 处理封装消息段（RFC 2046）。内层实体整体再走一遍
+// Parse，内层树挂到 Part.Message 上。封装段只允许身份 CTE（7bit/8bit/
+// binary，缺省视为 7bit）；base64 / quoted-printable 在 RFC 2046 下
+// 不合法，明确报错。
+func parseMessageRFC822(p *Part, body []byte) (*Part, error) {
+	switch strings.ToLower(strings.TrimSpace(p.CTE)) {
+	case "", "7bit", "8bit", "binary":
+	default:
+		return nil, fmt.Errorf("%w: message/rfc822 with %q", ErrUnsupportedEncoding, p.CTE)
+	}
+	if _, _, ok := splitHeaderBody(body); !ok {
+		return nil, fmt.Errorf("%w: no header/body blank line", ErrMissingInnerMessage)
+	}
+	inner, err := parseEntity(body)
+	if err != nil {
+		return nil, fmt.Errorf("message/rfc822 inner: %w", err)
+	}
+	p.Message = inner
+	return p, nil
 }
 
 // validateBodyCharset 钉住 charset 契约：charset 参数只接受

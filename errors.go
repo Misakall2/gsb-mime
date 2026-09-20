@@ -22,4 +22,14 @@ var (
 	// ErrMalformedParameter 表示 Content-Type / Content-Disposition
 	// 参数语法损坏，或者 2231 续行序号缺失、跳跃、重复。
 	ErrMalformedParameter = errors.New("mimemsg: malformed media parameter")
+	// ErrMissingInnerMessage 表示 message/rfc822 段没有内嵌消息头区块，
+	// 或者序列化时 Part.Message 为空。
+	ErrMissingInnerMessage = errors.New("mimemsg: message/rfc822 without inner message")
+	// ErrNotRelated 表示调用 RelatedHTML 的节点不是 multipart/related。
+	ErrNotRelated = errors.New("mimemsg: part is not multipart/related")
+	// ErrMissingHTMLPart 表示 multipart/related 缺少根 text/html 段。
+	ErrMissingHTMLPart = errors.New("mimemsg: multipart/related missing root text/html part")
+	// ErrInvalidCID 表示 related 中存在语法非法、重复、被 HTML 引用但
+	// 没有对应段的 Content-ID / cid: 引用。
+	ErrInvalidCID = errors.New("mimemsg: invalid content-id reference")
 )

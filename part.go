@@ -33,6 +33,10 @@ type Part struct {
 
 	Body  []byte
 	Parts []*Part
+
+	// Message 仅在 MediaType() == "message/rfc822" 时有意义，持有解开后
+	// 的内层整棵树。这类节点的 Body 为 nil，Parts 也为空。
+	Message *Part
 }
 
 // MediaType 返回小写媒体类型，例如 "multipart/alternative"。
