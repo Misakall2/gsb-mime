@@ -45,7 +45,9 @@ func decodeBase64Body(body []byte) ([]byte, error) {
 }
 
 // decodeStrictQP 在标准库 QP 解码之外，额外钉住三件事：
-//   - "=" 后必须紧跟两个十六进制数字（软换行 "=\r\n" 除外）；
+//   - "=" 后必须紧跟两个十六进制数字（软换行除外）。软换行除标准的
+//     "=\r\n" / "=\n" 外，兼容事故形态 "=" 与 CRLF 之间夹了空格/制表符，
+//     以及软换行后一行直接是未编码的 UTF-8 高位字节；
 //   - 输入不得包含裸 '\r'（必须 \r\n 成对）。
 //   - 未编码的行尾空白按 RFC 2045 丢弃。
 //
@@ -73,20 +75,26 @@ func decodeStrictQP(body []byte) ([]byte, error) {
 		if body[i] != '=' {
 			continue
 		}
-		// 软换行。
-		if i+1 < len(body) && body[i+1] == '\n' {
-			i++
-			continue
+		// 软换行："=" 后允许若干 WSP，再跟 CRLF / 裸 LF。
+		// 事故里常见 "= \r\n"（等号后被网关塞了空格），行首续行的
+		// 中文原始 UTF-8 字节则完全不经过这里，按普通字节保留即可。
+		k := i + 1
+		for k < len(body) && (body[k] == ' ' || body[k] == '\t') {
+			k++
 		}
-		if i+2 < len(body) && body[i+1] == '\r' && body[i+2] == '\n' {
-			i += 2
+		switch {
+		case k < len(body) && body[k] == '\n':
+			i = k // for 循环末尾还要 i++，落到 '\n' 之后
+			continue
+		case k+1 < len(body) && body[k] == '\r' && body[k+1] == '\n':
+			i = k + 1 // 同上，跳过 '\r'，末尾 i++ 跳过 '\n'
 			continue
 		}
 		// 必须是两个十六进制数字。
-		if i+2 >= len(body) || !isHex(body[i+1]) || !isHex(body[i+2]) {
+		if k+1 >= len(body) || !isHex(body[k]) || !isHex(body[k+1]) {
 			return nil, fmt.Errorf("%w: bad hex escape at byte %d", ErrInvalidQuotedPrintable, i)
 		}
-		i += 2
+		i = k + 1
 	}
 	cleaned = appendQPTrailing(cleaned, body[lineStart:])
 	out, err := readAllQP(cleaned)
@@ -100,8 +108,9 @@ func decodeStrictQP(body []byte) ([]byte, error) {
 func appendQPTrailing(dst, line []byte) []byte {
 	end := len(line)
 	for end > 0 && (line[end-1] == ' ' || line[end-1] == '\t') {
-		// 已编码的空白（=20 / =09）不是裸空白，必须保留。
-		if end >= 3 && line[end-3] == '=' {
+		// 已编码的空白（=20 / =09）不是裸空白，必须保留：
+		// 末尾是 WSP 时，'=' 在它前面两个字节（end-2）。
+		if end >= 2 && line[end-2] == '=' {
 			break
 		}
 		end--

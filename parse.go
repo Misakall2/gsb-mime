@@ -234,7 +234,11 @@ func parseDisposition(value string) (string, map[string]string, error) {
 //   - boundary 区分大小写，定界行必须独占一行（CRLF 或裸 LF）；
 //   - 第一段之前的 preamble、收尾之后的 epilogue 一律忽略；
 //   - 每个 part 去掉定界行自带的那一个行尾；
-//   - 输入结束仍没有 "--boundary--" 收尾时返回 ErrMissingClosingBoundary。
+//   - 输入结束仍没有任何定界行时返回 ErrMissingClosingBoundary；
+//   - 事故宽容：输入恰好结束在最后一个定界行（"--boundary" 后直接
+//     EOF，少了收尾的两条横线）时按正常收尾处理，已收集的 part
+//     一个都不能丢，也不当致命错误。这与 Go 标准库 mime/multipart
+//     的行为一致；定界行后若还粘着非空白字符则仍按缺失收尾报错。
 func splitParts(body []byte, boundary string) ([][]byte, error) {
 	delim := []byte("--" + boundary)
 	var parts [][]byte
@@ -289,10 +293,8 @@ func scanDelimiter(body []byte, from int, delim []byte) (start int, closing bool
 		}
 		switch {
 		case k == len(body):
-			if !isClose {
-				// 输入在非收尾定界行处结束，后面缺一个段且没有收尾。
-				return 0, false, 0, ErrMissingClosingBoundary
-			}
+			// 输入就在定界行处结束：无论有没有收尾 "--" 都视为收尾，
+			// 最后一段（在调用方）已在本次扫描前收集。
 			return j, true, k, nil
 		case body[k] == '\n':
 			return j, isClose, k + 1, nil

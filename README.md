@@ -31,7 +31,19 @@ MIME 邮件编解码库（解析树 + 同树再封装），只用于网关拆信
 - boundary 带引号：按 RFC 2045 去引号，内部空格原样保留。
 - 空 boundary（`boundary=""`）：`ErrEmptyBoundary`。
 - 缺收尾 `--boundary--`：`ErrMissingClosingBoundary`；粘在正文里、
-  不在行首的伪收尾行不算数。
+  不在行首的伪收尾行不算数。事故宽容：输入恰好结束在最后一个
+  `--boundary` 定界行（少了收尾两条横线）时按正常收尾处理，已收集
+  的段一个不丢（与 Go 标准库 `mime/multipart` 一致）；定界行后还
+  粘着非空白字符仍按缺失收尾报错。
+- RFC 2047：encoded-word 内部被折行（token 被 CRLF+WSP 切开）会
+  先拼回再解码；相邻 encoded-word 之间的空白吞并，词与普通文本
+  之间的空格保留。
+- RFC 2231 续行：`charset'lang'` 前缀只认第 0 段，后续段按纯数据
+  做 percent 解码后拼字节，再统一按首段 charset 解释（多字节字符
+  可以跨段）。
+- quoted-printable：兼容 `=` 与 CRLF 之间夹了 WSP 的事故软换行，
+  软换行后的未编码 UTF-8 高位字节按原样拼接；`abc=`、`=XY` 这类
+  真损坏仍然返回 `ErrInvalidQuotedPrintable`。
 - preamble / epilogue 忽略，不产生段；空 multipart 合法。
 
 ## 快速示例
