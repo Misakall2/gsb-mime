@@ -33,6 +33,10 @@ type Part struct {
 
 	Body  []byte
 	Parts []*Part
+
+	// Message 仅在媒体类型为 message/rfc822 时使用，保存转发段里
+	// 内层邮件解析出来的完整树；此时 Body 为 nil、Parts 为空。
+	Message *Part
 }
 
 // MediaType 返回小写媒体类型，例如 "multipart/alternative"。
@@ -50,6 +54,10 @@ func (p *Part) SetMediaType(mt string) {
 
 func (p *Part) isMultipart() bool {
 	return strings.HasPrefix(p.mediaType, "multipart/")
+}
+
+func (p *Part) isMessage() bool {
+	return p.mediaType == "message/rfc822"
 }
 
 // ContentTypeParams 返回 Content-Type 参数的副本。

@@ -58,6 +58,18 @@ func parseEntity(data []byte) (*Part, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if p.isMessage() {
+		// message/rfc822 段体本身就是一封完整邮件（含头字段），
+		// 递归解析成内层树；message/* 不套 charset 校验。
+		inner, err := parseEntity(decoded)
+		if err != nil {
+			return nil, err
+		}
+		p.Message = inner
+		return p, nil
+	}
+
 	p.Body = decoded
 	return p, validateBodyCharset(p)
 }

@@ -22,4 +22,10 @@ var (
 	// ErrMalformedParameter 表示 Content-Type / Content-Disposition
 	// 参数语法损坏，或者 2231 续行序号缺失、跳跃、重复。
 	ErrMalformedParameter = errors.New("mimemsg: malformed media parameter")
+	// ErrInvalidCID 表示 related 段里的 Content-ID 不是 "<...>" 形态，
+	// 或 HTML 中引用的 cid 找不到对应段。
+	ErrInvalidCID = errors.New("mimemsg: invalid content-id reference")
+	// ErrRelatedNoHTML 表示 multipart/related 段里没有可供抽取资源的
+	// text/html 根段（起始段缺失）。
+	ErrRelatedNoHTML = errors.New("mimemsg: multipart/related without text/html root")
 )

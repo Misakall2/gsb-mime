@@ -15,6 +15,16 @@ MIME 邮件编解码库（解析树 + 同树再封装），只用于网关拆信
   未知 charset 返回 `ErrUnsupportedCharset`，不会静默当 UTF-8。
 - `Marshal(*Part) ([]byte, error)`：按解析树重新序列化。段数、媒体类型、
   附件字节、UTF-8 文件名、`Content-ID` 可往返；折叠空白允许有差异。
+- `Forward(*Part) (*Part, error)`：把一封已解析的信深拷贝后包成
+  `message/rfc822` 转发段，解开后 `Part.Message` 是内层完整树。
+  转发段只标 `7bit`/`8bit`/`binary`（按内层字节自动选），不改成
+  base64，8bit 中文正文可直接转发。
+- `RelatedHTML(*Part)` / `RelatedResources(*Part)`：从
+  `multipart/related` 取 HTML 根段（认 `start` 参数），并列出 HTML
+  实际引用到的 `cid -> 字节` 映射（HTML 里的 cid 原样保留）。
+  非法 `Content-ID`、悬空 cid、缺 HTML 根段返回 `ErrInvalidCID` /
+  `ErrRelatedNoHTML`。
+- `7bit` / `8bit` / `binary` 正文原样透传，绝不会被当 base64 乱解。
 
 ## 钉死的边界行为
 

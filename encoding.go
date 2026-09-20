@@ -152,6 +152,25 @@ func is7BitLineSafe(body []byte) bool {
 	return true
 }
 
+// chooseMessageCTE 为 message/rfc822 转发段选标识型 CTE：
+// 含 NUL 字节用 binary；含高位字节用 8bit；否则 7bit。
+// 永远不选 base64 / quoted-printable，内层各段自己的 CTE 保持不动。
+func chooseMessageCTE(body []byte) string {
+	hasHighBit := false
+	for _, b := range body {
+		if b == 0 {
+			return "binary"
+		}
+		if b >= 0x80 {
+			hasHighBit = true
+		}
+	}
+	if hasHighBit {
+		return "8bit"
+	}
+	return "7bit"
+}
+
 // encodeTransfer 按指定 CTE 编码叶子正文。
 func encodeTransfer(body []byte, cte string) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(cte)) {

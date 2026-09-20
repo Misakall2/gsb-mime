@@ -3,6 +3,7 @@ package mimemsg
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -41,6 +42,33 @@ func marshalEntity(p *Part, root bool) ([]byte, error) {
 		b.WriteString(boundary)
 		b.WriteString("--\r\n")
 		out = append(out, b.String()...)
+		return out, nil
+	}
+
+	if p.isMessage() {
+		if p.Message == nil {
+			return nil, fmt.Errorf("mimemsg: message/rfc822 part without inner message")
+		}
+		inner, err := marshalEntity(p.Message, true)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, serializeHeaders(p, "")...)
+		cte := p.CTE
+		if cte == "" {
+			cte = chooseMessageCTE(inner)
+		}
+		switch cte {
+		case "7bit", "8bit", "binary":
+		default:
+			// RFC 2046：message/rfc822 只允许标识型编码（无/7bit/8bit/binary），
+			// 网关转发 8bit 正文时也不能把整封信改 base64。
+			return nil, fmt.Errorf("%w: message/rfc822 with %q", ErrUnsupportedEncoding, cte)
+		}
+		out = append(out, "Content-Transfer-Encoding: "...)
+		out = append(out, cte...)
+		out = append(out, "\r\n\r\n"...)
+		out = append(out, inner...)
 		return out, nil
 	}
 
