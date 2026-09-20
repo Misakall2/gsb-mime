@@ -32,12 +32,16 @@ func limitedCharsetReader(charset string, input io.Reader) (io.Reader, error) {
 
 var rfc2047Decoder = &mime.WordDecoder{CharsetReader: limitedCharsetReader}
 
-// decodeEncodedWords 解 RFC 2047 encoded-word。mime.WordDecoder 天然支持
+// decodeEncodedWords 解 RFC 2047 encoded-word。mime.WordDecoder 支持
 // 同一头值里相邻多段 encoded-word（中间只隔折叠空白时拼接），Q、B 两种
 // 编码都走这里。注意标准库内置了 iso-8859-1，在 CharsetReader 之前就放行，
 // 所以先用 validateEncodedWordCharsets 把 us-ascii/utf-8 之外的 charset
 // 挡掉，未知 charset 一律报错。
+//
+// 有些 MTA 会在 encoded-word token 内部折行；标准库不识别这种畸形输入。
+// 词内折叠不承载语义，先补齐后再交给标准库解码。
 func decodeEncodedWords(s string) (string, error) {
+	s = mendFoldedEncodedWords(s)
 	if err := validateEncodedWordCharsets(s); err != nil {
 		return "", err
 	}
@@ -46,6 +50,71 @@ func decodeEncodedWords(s string) (string, error) {
 		return "", err
 	}
 	return out, nil
+}
+
+// mendFoldedEncodedWords removes folding WSP inside one encoded-word.
+// Header unfolding may have already replaced CRLF WSP with a single space.
+// Folding between words remains in the value and is handled by DecodeHeader.
+func mendFoldedEncodedWords(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+
+	for i := 0; i < len(s); {
+		if i+1 >= len(s) || s[i] != '=' || s[i+1] != '?' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+
+		start := i
+		j := i + 2
+		for q := 0; q < 2; q++ {
+			for j < len(s) && s[j] != '?' {
+				j++
+			}
+			if j >= len(s) {
+				break
+			}
+			j++
+		}
+
+		end := -1
+		for ; j+1 < len(s); j++ {
+			if s[j] == '?' && s[j+1] == '=' {
+				end = j + 2
+				break
+			}
+		}
+		if end < 0 {
+			b.WriteString(s[start:])
+			break
+		}
+
+		for k := start; k < end; {
+			if s[k] == ' ' || s[k] == '\t' {
+				k++
+				continue
+			}
+			lineEnd := 0
+			switch {
+			case s[k] == '\r' && k+1 < end && s[k+1] == '\n':
+				lineEnd = 2
+			case s[k] == '\n' || s[k] == '\r':
+				lineEnd = 1
+			}
+			if lineEnd > 0 && k+lineEnd < end && (s[k+lineEnd] == ' ' || s[k+lineEnd] == '\t') {
+				k += lineEnd
+				for k < end && (s[k] == ' ' || s[k] == '\t') {
+					k++
+				}
+				continue
+			}
+			b.WriteByte(s[k])
+			k++
+		}
+		i = end
+	}
+	return b.String()
 }
 
 // validateEncodedWordCharsets 扫描 "=?charset?[qQbB]?..." 形态，

@@ -10,12 +10,11 @@ import (
 // 参数值解析后的形态。同一个逻辑参数（例如 filename）可能同时有
 // 普通值和 RFC 2231 扩展值；扩展值优先。
 type paramValue struct {
-	value    string // 普通参数值，已经过 quoted-string 反转义
-	ext      string // RFC 2231 单段扩展值（filename*=...），已按 charset 解码
-	extOK    bool
-	segs     map[int]string // 2231 多段值（filename*0*=... filename*1*=...）
-	charset  string
-	hasChset bool
+	value   string // 普通参数值，已经过 quoted-string 反转义
+	ext     string // RFC 2231 单段扩展值（filename*=...），已做 percent 解码
+	extOK   bool
+	segs    map[int]string // 2231 多段值，各段保留 percent 解码后的原始字节
+	charset string
 }
 
 func newParamValue() *paramValue {
@@ -139,28 +138,8 @@ func parseParameters(s string) (map[string]*paramValue, []string, error) {
 		if !isExtended {
 			pv.value = raw
 		} else {
-			charset, lang, data, hasCharset := splitExtValue(raw)
-			decoded, perr := decodePercent(data, charset)
-			if perr != nil {
+			if perr := pv.assignExtended(segIndex, raw); perr != nil {
 				return nil, nil, fmt.Errorf("parameter %q: %w", logical, perr)
-			}
-			_ = lang
-			if segIndex >= 0 {
-				if _, dup := pv.segs[segIndex]; dup {
-					return nil, nil, fmt.Errorf("%w: parameter %q has duplicate segment %d", ErrMalformedParameter, logical, segIndex)
-				}
-				pv.segs[segIndex] = decoded
-				if hasCharset {
-					pv.charset = strings.ToLower(charset)
-					pv.hasChset = true
-				}
-			} else {
-				pv.ext = decoded
-				pv.extOK = true
-				if hasCharset {
-					pv.charset = strings.ToLower(charset)
-					pv.hasChset = true
-				}
 			}
 		}
 
@@ -173,6 +152,39 @@ func parseParameters(s string) (map[string]*paramValue, []string, error) {
 		}
 		t.pos++
 	}
+}
+
+func (pv *paramValue) assignExtended(segIndex int, raw string) error {
+	if segIndex < 0 {
+		charset, _, data, hasCharset := splitExtValue(raw)
+		decoded, err := decodePercent(data)
+		if err != nil {
+			return err
+		}
+		pv.ext = decoded
+		pv.extOK = true
+		if hasCharset {
+			pv.charset = strings.ToLower(charset)
+		}
+		return nil
+	}
+
+	if _, dup := pv.segs[segIndex]; dup {
+		return fmt.Errorf("%w: duplicate segment %d", ErrMalformedParameter, segIndex)
+	}
+	data := raw
+	if segIndex == 0 {
+		if charset, _, rest, hasCharset := splitExtValue(raw); hasCharset {
+			pv.charset = strings.ToLower(charset)
+			data = rest
+		}
+	}
+	decoded, err := decodePercent(data)
+	if err != nil {
+		return err
+	}
+	pv.segs[segIndex] = decoded
+	return nil
 }
 
 // splitExtValue 切分 RFC 2231 的 charset'lang'value。
@@ -192,7 +204,8 @@ func splitExtValue(v string) (charset, lang, data string, hasCharset bool) {
 }
 
 // decodePercent 是 RFC 2231 percent-encoding；'+' 就是普通加号。
-func decodePercent(s, charset string) (string, error) {
+// 返回原始字节，charset 在完整续行拼接后再解释。
+func decodePercent(s string) (string, error) {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		if s[i] != '%' {
@@ -205,7 +218,7 @@ func decodePercent(s, charset string) (string, error) {
 		b.WriteByte(unhex(s[i+1])<<4 | unhex(s[i+2]))
 		i += 2
 	}
-	return decodeCharset(b.String(), charset)
+	return b.String(), nil
 }
 
 func isHex(c byte) bool {
@@ -246,10 +259,10 @@ func (pv *paramValue) resolve() (string, error) {
 		for i := 0; i < n; i++ {
 			b.WriteString(pv.segs[i])
 		}
-		return b.String(), nil
+		return decodeCharset(b.String(), pv.charset)
 	}
 	if pv.extOK {
-		return pv.ext, nil
+		return decodeCharset(pv.ext, pv.charset)
 	}
 	return pv.value, nil
 }
