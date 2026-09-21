@@ -1,14 +1,8 @@
 package mimemsg
 
 import (
-	"errors"
-	"fmt"
-	"net/textproto"
 	"strings"
-	"unicode/utf8"
 )
-
-var errInvalidUTF8 = errors.New("mimemsg: body is not valid utf-8")
 
 // Part 是 MIME 树的一个节点。叶子节点的 Body 是 Content-Transfer-Encoding
 // 解码后的原始字节；multipart 节点的 Parts 是有序的子段，Body 为 nil。
@@ -79,7 +73,7 @@ func (p *Part) SetContentTypeParam(name, value string) {
 
 // Charset 返回 Content-Type 中的 charset 参数（小写），缺省为 utf-8。
 func (p *Part) Charset() string {
-	if cs := strings.ToLower(p.ctParams["charset"]); cs != "" {
+	if cs := normalizeCharset(p.ctParams["charset"]); cs != "" {
 		return cs
 	}
 	return "utf-8"
@@ -133,57 +127,13 @@ func (p *Part) SetContentID(cid string) {
 // UTF-8 字节无效时返回错误，未知 charset 由 Parse 阶段拒绝。
 func (p *Part) Text() (string, error) {
 	cs := p.Charset()
-	switch cs {
-	case "", "us-ascii", "ascii", "utf-8", "utf8":
-	default:
-		return "", fmt.Errorf("%w: %q", ErrUnsupportedCharset, cs)
+	if err := checkCharset(cs); err != nil {
+		return "", err
 	}
-	if (cs == "utf-8" || cs == "utf8") && !utf8.Valid(p.Body) {
-		return "", errInvalidUTF8
+	if isUTF8Charset(cs) {
+		if err := validateTextBytes(cs, p.Body); err != nil {
+			return "", err
+		}
 	}
 	return string(p.Body), nil
-}
-
-// Header 是 RFC 2045 头字段的多重映射。
-type Header map[string][]string
-
-// Get 取头值并做 RFC 2047 encoded-word 解码（支持同一头字段中
-// 相邻多段 =?charset?Q?..?= =?charset?B?..?=，含 Q/B 两种编码和中文）。
-func (h Header) Get(key string) string {
-	raw := h.GetRaw(key)
-	if raw == "" {
-		return ""
-	}
-	decoded, err := decodeEncodedWords(raw)
-	if err != nil {
-		return raw
-	}
-	return decoded
-}
-
-// GetRaw 取未做 encoded-word 解码的原始头值。
-func (h Header) GetRaw(key string) string {
-	if h == nil {
-		return ""
-	}
-	v := h[textproto.CanonicalMIMEHeaderKey(key)]
-	if len(v) == 0 {
-		return ""
-	}
-	return v[0]
-}
-
-// Set 用未编码的原始值设置头字段（非 ASCII 值在 Marshal 时编码）。
-func (h Header) Set(key, value string) {
-	h[textproto.CanonicalMIMEHeaderKey(key)] = []string{value}
-}
-
-// Values / Add 支持同名字段多次出现。
-func (h Header) Add(key, value string) {
-	ck := textproto.CanonicalMIMEHeaderKey(key)
-	h[ck] = append(h[ck], value)
-}
-
-func (h Header) Values(key string) []string {
-	return h[textproto.CanonicalMIMEHeaderKey(key)]
 }

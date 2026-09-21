@@ -236,15 +236,6 @@ func unhex(c byte) byte {
 	}
 }
 
-func decodeCharset(s, charset string) (string, error) {
-	switch strings.ToLower(charset) {
-	case "", "us-ascii", "ascii", "utf-8", "utf8":
-		return s, nil
-	default:
-		return "", fmt.Errorf("%w: %q", ErrUnsupportedCharset, charset)
-	}
-}
-
 // resolve 按 RFC 2231 规则合并参数：多段扩展值优先于单段扩展值，
 // 扩展值优先于普通值；序号必须从 0 开始连续。
 func (pv *paramValue) resolve() (string, error) {
@@ -259,10 +250,17 @@ func (pv *paramValue) resolve() (string, error) {
 		for i := 0; i < n; i++ {
 			b.WriteString(pv.segs[i])
 		}
-		return decodeCharset(b.String(), pv.charset)
+		// 续行拼接完成后再按统一 charset 政策解释字节。
+		if err := checkCharset(pv.charset); err != nil {
+			return "", err
+		}
+		return b.String(), nil
 	}
 	if pv.extOK {
-		return decodeCharset(pv.ext, pv.charset)
+		if err := checkCharset(pv.charset); err != nil {
+			return "", err
+		}
+		return pv.ext, nil
 	}
 	return pv.value, nil
 }

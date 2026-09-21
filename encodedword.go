@@ -8,26 +8,23 @@ import (
 	"strings"
 )
 
-// limitedCharsetReader 只接受 us-ascii 与 utf-8。遇到别的 charset 返回
-// ErrUnsupportedCharset，调用方可以明确感知，不会静默当 UTF-8。
+// limitedCharsetReader 只接受统一 charset 政策（charset.go）认可的
+// us-ascii 与 utf-8。遇到别的 charset 返回 ErrUnsupportedCharset，
+// 调用方可以明确感知，不会静默当 UTF-8。
 func limitedCharsetReader(charset string, input io.Reader) (io.Reader, error) {
 	raw, err := io.ReadAll(input)
 	if err != nil {
 		return nil, err
 	}
-	switch strings.ToLower(charset) {
-	case "us-ascii", "ascii":
-		for _, b := range raw {
-			if b >= 0x80 {
-				return nil, fmt.Errorf("%w: non-ascii byte in us-ascii text", ErrUnsupportedCharset)
-			}
-		}
-		return bytes.NewReader(raw), nil
-	case "utf-8", "utf8":
-		return bytes.NewReader(raw), nil
-	default:
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedCharset, charset)
+	if err := checkCharset(charset); err != nil {
+		return nil, err
 	}
+	if isASCIICharset(charset) {
+		if err := requireASCIIBytes(raw); err != nil {
+			return nil, err
+		}
+	}
+	return bytes.NewReader(raw), nil
 }
 
 var rfc2047Decoder = &mime.WordDecoder{CharsetReader: limitedCharsetReader}
@@ -118,7 +115,7 @@ func mendFoldedEncodedWords(s string) string {
 }
 
 // validateEncodedWordCharsets 扫描 "=?charset?[qQbB]?..." 形态，
-// 确认每个 encoded-word 声明的 charset 都受支持。
+// 确认每个 encoded-word 声明的 charset 都过统一 charset 政策。
 func validateEncodedWordCharsets(s string) error {
 	for {
 		i := strings.Index(s, "=?")
@@ -130,16 +127,14 @@ func validateEncodedWordCharsets(s string) error {
 		if q <= 0 {
 			return nil // 不是合法起始，交给标准库按原文处理
 		}
-		charset := strings.ToLower(s[:q])
+		charset := s[:q]
 		rest := s[q+1:]
 		if len(rest) < 2 || (rest[1] != '?') || (rest[0] != 'q' && rest[0] != 'Q' && rest[0] != 'b' && rest[0] != 'B') {
 			s = rest
 			continue
 		}
-		switch charset {
-		case "us-ascii", "ascii", "utf-8", "utf8":
-		default:
-			return fmt.Errorf("%w: encoded-word charset %q", ErrUnsupportedCharset, charset)
+		if err := checkCharset(charset); err != nil {
+			return fmt.Errorf("encoded-word: %w", err)
 		}
 		s = rest[2:]
 	}
