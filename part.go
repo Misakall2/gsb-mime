@@ -133,9 +133,7 @@ func (p *Part) SetContentID(cid string) {
 // UTF-8 字节无效时返回错误，未知 charset 由 Parse 阶段拒绝。
 func (p *Part) Text() (string, error) {
 	cs := p.Charset()
-	switch cs {
-	case "", "us-ascii", "ascii", "utf-8", "utf8":
-	default:
+	if !isSupportedCharset(cs) {
 		return "", fmt.Errorf("%w: %q", ErrUnsupportedCharset, cs)
 	}
 	if (cs == "utf-8" || cs == "utf8") && !utf8.Valid(p.Body) {

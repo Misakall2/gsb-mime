@@ -15,7 +15,7 @@ func limitedCharsetReader(charset string, input io.Reader) (io.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch strings.ToLower(charset) {
+	switch normalizeCharset(charset) {
 	case "us-ascii", "ascii":
 		for _, b := range raw {
 			if b >= 0x80 {
@@ -31,6 +31,10 @@ func limitedCharsetReader(charset string, input io.Reader) (io.Reader, error) {
 }
 
 var rfc2047Decoder = &mime.WordDecoder{CharsetReader: limitedCharsetReader}
+
+func decodeHeaderValue(value string) (string, error) {
+	return decodeEncodedWords(value)
+}
 
 // decodeEncodedWords 解 RFC 2047 encoded-word。mime.WordDecoder 支持
 // 同一头值里相邻多段 encoded-word（中间只隔折叠空白时拼接），Q、B 两种
@@ -136,9 +140,7 @@ func validateEncodedWordCharsets(s string) error {
 			s = rest
 			continue
 		}
-		switch charset {
-		case "us-ascii", "ascii", "utf-8", "utf8":
-		default:
+		if !isSupportedCharset(charset) {
 			return fmt.Errorf("%w: encoded-word charset %q", ErrUnsupportedCharset, charset)
 		}
 		s = rest[2:]

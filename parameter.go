@@ -237,12 +237,18 @@ func unhex(c byte) byte {
 }
 
 func decodeCharset(s, charset string) (string, error) {
-	switch strings.ToLower(charset) {
-	case "", "us-ascii", "ascii", "utf-8", "utf8":
-		return s, nil
-	default:
-		return "", fmt.Errorf("%w: %q", ErrUnsupportedCharset, charset)
+	if !isSupportedCharset(charset) {
+		return "", fmt.Errorf("%w: %q", ErrUnsupportedCharset, normalizeCharset(charset))
 	}
+	return s, nil
+}
+
+func parseParameterString(s string) (map[string]string, error) {
+	params, _, err := parseParameters(s)
+	if err != nil {
+		return nil, err
+	}
+	return resolveParams(params)
 }
 
 // resolve 按 RFC 2231 规则合并参数：多段扩展值优先于单段扩展值，
